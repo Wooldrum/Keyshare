@@ -26,6 +26,7 @@ out_info    = {}
 paused      = False
 loop        = None
 PORT        = DEFAULT_PORT
+config_version = 1
 
 hs_counter      = 0
 hs_futures      = {}
@@ -46,7 +47,7 @@ def prompt_consent():
 • If streaming/recording, hide this window to avoid exposing your IP.
 • Peers see your IP, which may expose you to possible DDoS or location leaks.
 • P2P-only, no end-to-end encryption—use at your own risk.
-Default port: {DEFAULT_PORT}{' (customizable in advanced mode)' if AdvancedMode else ''}
+Default port: {DEFAULT_PORT}
 """)
     if input(f"{Colors.GREEN}Do you consent? (yes/no): {Colors.RESET}").strip().lower() not in ("yes","y"):
         print(f"{Colors.RED}Consent denied. Exiting.{Colors.RESET}"); sys.exit(0)
@@ -102,7 +103,7 @@ def inject(key_name, typ):
         print(f"{Colors.RED}[!] Injection error: {e}{Colors.RESET}")
 
 async def ws_handler(ws, path):
-    global hs_counter, ALLOWED
+    global hs_counter
     try:
         msg = await ws.recv()
         req = json.loads(msg)
@@ -125,7 +126,7 @@ async def ws_handler(ws, path):
             await ws.close()
             return
 
-        response = {"type": "handshake_response", "allow": True, "allowed_keys": list(ALLOWED)}
+        response = {"type": "handshake_response", "allow": True, "allowed_keys": list(ALLOWED), "config_version": config_version}
         await ws.send(json.dumps(response))
         
         clients.add(ws)
@@ -148,7 +149,7 @@ async def ws_handler(ws, path):
             clients.discard(ws)
 
 async def connect(peers, local_ip, uname):
-    global ALLOWED
+    global ALLOWED, config_version
     for addr in peers:
         uri = f"ws://{addr}:{PORT}"
         try:
@@ -161,7 +162,7 @@ async def connect(peers, local_ip, uname):
                 new_allowed = set(res.get('allowed_keys', DEFAULT_ALLOWED))
                 consent_given = True
 
-                if new_allowed != DEFAULT_ALLOWED:
+                if new_allowed != ALLOWED:
                     print(f"\n{Colors.YELLOW}WARNING: The host ({addr}) is using custom key settings.{Colors.RESET}")
                     print(f"{Colors.YELLOW}The following keys will be shared: {', '.join(sorted(list(new_allowed)))}{Colors.RESET}")
                     
@@ -182,21 +183,53 @@ async def connect(peers, local_ip, uname):
 
                 outbound.add(ws); out_info[ws] = addr
                 ALLOWED = new_allowed
+                config_version = res.get('config_version', 1)
                 print(f"{Colors.GREEN}[+] out: {addr}{Colors.RESET}")
                 if new_allowed != DEFAULT_ALLOWED:
                     print(f"{Colors.BLUE}Key settings synced with host.{Colors.RESET}")
 
-                asyncio.create_task(handle_peer(ws))
+                asyncio.create_task(handle_peer(ws, addr))
             else:
                 print(f"{Colors.RED}[-] out denied: {addr}{Colors.RESET}")
                 await ws.close()
         except Exception as e:
             print(f"{Colors.RED}[!] Connection to {addr} failed: {e}{Colors.RESET}")
 
-async def handle_peer(ws):
+async def handle_peer(ws, addr):
+    global ALLOWED, paused, config_version
     try:
         async for raw in ws:
             d = json.loads(raw)
+            
+            if d.get("type") == "config_update":
+                new_version = d.get("config_version")
+                if new_version > config_version:
+                    was_paused = paused
+                    paused = True
+                    print(f"\n{Colors.YELLOW}WARNING: The host ({addr}) has changed the key settings.{Colors.RESET}")
+                    new_keys = set(d.get("allowed_keys"))
+                    print(f"{Colors.YELLOW}The new keys are: {', '.join(sorted(list(new_keys)))}{Colors.RESET}")
+                    
+                    consent_given = False
+                    while True:
+                        confirm = input(f"{Colors.GREEN}Accept new settings? (yes/no): {Colors.RESET}").strip().lower()
+                        if confirm in ('yes', 'y'):
+                            consent_given = True
+                            break
+                        elif confirm in ('no', 'n'):
+                            break
+                    
+                    if consent_given:
+                        ALLOWED = new_keys
+                        config_version = new_version
+                        paused = was_paused
+                        print(f"{Colors.BLUE}Settings updated.{Colors.RESET}")
+                    else:
+                        print(f"{Colors.RED}Disconnecting due to settings rejection.{Colors.RESET}")
+                        await ws.close()
+                        break
+                continue
+
             if d.get("origin") == INSTANCE_ID: continue
             if not paused:
                 inject(d["key"], d["type"])
@@ -217,18 +250,14 @@ async def broadcast(msg, exclude=None):
         await asyncio.gather(*tasks, return_exceptions=True)
 
 def get_key_name(key):
-    if isinstance(key, str):
-        return key
-    if isinstance(key, Key):
-        return key.name
-    if hasattr(key, 'char') and key.char:
-        return key.char.lower()
+    if isinstance(key, str): return key
+    if isinstance(key, Key): return key.name
+    if hasattr(key, 'char') and key.char: return key.char.lower()
     return None
 
 def handle_key(k, typ):
     if paused or not loop: return
     key_name = get_key_name(k)
-    
     if key_name in ALLOWED:
         pkt = {"origin":INSTANCE_ID,"key":key_name,"type":typ}
         asyncio.run_coroutine_threadsafe(broadcast(pkt), loop)
@@ -241,19 +270,23 @@ def start_hook():
         listener.join()
 
 def cmd_loop():
-    global paused, loop
-    cmds = {"pause","resume","stop","peers","allow","deny"}
+    global paused, loop, ALLOWED, config_version
+    base_cmds = {"pause","resume","stop","peers","allow","deny"}
+    
     while True:
         try:
+            current_cmds = base_cmds.copy()
+            if AdvancedMode:
+                current_cmds.add("edit")
+
             line = input().strip().split()
             if not line: continue
             cmd = line[0].lower()
+
             if cmd == "pause":
-                print(f"{Colors.YELLOW}== paused =={Colors.RESET}")
-                paused=True
+                print(f"{Colors.YELLOW}== paused =={Colors.RESET}"); paused=True
             elif cmd == "resume":
-                print(f"{Colors.YELLOW}== resumed =={Colors.RESET}")
-                paused=False
+                print(f"{Colors.YELLOW}== resumed =={Colors.RESET}"); paused=False
             elif cmd in ("stop","exit","quit"):
                 print(f"{Colors.RED}== stopping =={Colors.RESET}")
                 if loop: loop.call_soon_threadsafe(loop.stop)
@@ -270,20 +303,30 @@ def cmd_loop():
                     print(f"{Colors.GREEN if cmd=='allow' else Colors.RED}Request #{hid} has been {'allowed' if cmd=='allow' else 'denied'}.{Colors.RESET}")
                 else:
                     print(f"{Colors.RED}No pending request #{hid}{Colors.RESET}")
+            elif AdvancedMode and cmd == "edit":
+                print(f"{Colors.YELLOW}== Pausing for edit =={Colors.RESET}"); paused=True
+                new_keys = input_allowed_keys()
+                if new_keys != ALLOWED:
+                    ALLOWED = new_keys
+                    config_version += 1
+                    print(f"{Colors.BLUE}Broadcasting updated settings to peers...{Colors.RESET}")
+                    update_msg = {"type": "config_update", "allowed_keys": list(ALLOWED), "config_version": config_version}
+                    asyncio.run_coroutine_threadsafe(broadcast(update_msg), loop)
+                print(f"{Colors.YELLOW}== Resuming =={Colors.RESET}"); paused=False
             else:
-                print(f"{Colors.YELLOW}cmds:{Colors.RESET}", ", ".join(sorted(cmds)))
+                print(f"{Colors.YELLOW}cmds:{Colors.RESET}", ", ".join(sorted(list(current_cmds))))
         except (EOFError, KeyboardInterrupt):
             if loop: loop.call_soon_threadsafe(loop.stop)
             break
 
-def konami_listener(activated_event):
+def konami_listener(activated_event, startup_finished_event):
     KONAMI_CODE = [Key.up, Key.up, Key.down, Key.down, Key.left, Key.right, Key.left, Key.right, 'b', 'a']
     code_keys = [get_key_name(k) for k in KONAMI_CODE]
     recent_keys = []
 
     def on_press(key):
         nonlocal recent_keys
-        if activated_event.is_set():
+        if startup_finished_event.is_set() or activated_event.is_set():
             return False
 
         key_name = get_key_name(key)
@@ -320,7 +363,8 @@ async def main():
     global loop, PORT, ALLOWED, AdvancedMode
     
     konami_activated = threading.Event()
-    konami_thread = threading.Thread(target=konami_listener, args=(konami_activated,), daemon=True)
+    startup_finished = threading.Event()
+    konami_thread = threading.Thread(target=konami_listener, args=(konami_activated, startup_finished), daemon=True)
     konami_thread.start()
     
     def consent_input_wrapper(result_container):
@@ -337,8 +381,6 @@ async def main():
     if konami_activated.is_set():
         consent_thread.join(timeout=5)
     
-    konami_activated.set()
-
     loop = asyncio.get_running_loop()
     username = input(f"{Colors.GREEN}Username: {Colors.RESET}").strip() or "Anonymous"
 
@@ -356,6 +398,9 @@ async def main():
     local_ip = input_ip("Your LAN IP (Press ENTER if this is correct)", default=get_local_ip())
     peers = input_peers()
     
+    startup_finished.set()
+    konami_thread.join(timeout=1)
+
     server = await websockets.serve(ws_handler, local_ip, PORT)
     print(f"{Colors.GREEN}✅ Server running on {local_ip}:{PORT}{Colors.RESET}")
     
@@ -365,7 +410,10 @@ async def main():
     if peers:
         asyncio.create_task(connect(peers, local_ip, username))
     
-    print(f"{Colors.GREEN}✅ Ready. Commands: pause | resume | stop | peers | allow <#> | deny <#>{Colors.RESET}")
+    ready_cmds = ["pause","resume","stop","peers","allow","deny"]
+    if AdvancedMode:
+        ready_cmds.append("edit")
+    print(f"{Colors.GREEN}✅ Ready. Commands: {', '.join(ready_cmds)}{Colors.RESET}")
     
     try:
         await server.wait_closed()
