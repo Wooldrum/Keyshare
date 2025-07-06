@@ -115,7 +115,8 @@ async def ws_handler(ws, path):
         fut = loop.create_future()
         hs_futures[hid] = fut
         hs_requests[hid] = (ws, user, ip)
-        print(f"{Colors.YELLOW}[?] ({hid}) {user}[{ip}] wants to connect. Type 'allow {hid}' or 'deny {hid}'.{Colors.RESET}")
+        print(f"\n{Colors.YELLOW}[!] Connection Request ({hid}): {user} at {ip} would like to join.\n"
+              f"    To accept, type 'allow {hid}'. To reject, type 'deny {hid}'.{Colors.RESET}")
 
         allow = await fut
         del hs_futures[hid], hs_requests[hid]
