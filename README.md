@@ -19,9 +19,9 @@ Keyshare is a Python-based utility that broadcasts keyboard inputs to other comp
 
 This application is designed for use on **trusted private networks only**.
 
-  - **No Encryption**: All keystroke data is broadcast without end-to-end encryption.
-  - **IP Address Exposure**: Your local IP address is shared with all peers. This can lead to potential security risks like DDoS attacks if used on an untrusted network.
-  - **Malicious Peers**: A malicious peer could potentially monitor your inputs.
+  * **No Encryption**: All keystroke data is broadcast without end-to-end encryption.
+  * **IP Address Exposure**: Your local IP address is shared with all peers. This can lead to potential security risks like DDoS attacks if used on an untrusted network.
+  * **Malicious Peers**: A malicious peer could potentially monitor your inputs.
 
 Do not use this tool on public or untrusted Wi-Fi networks. **Use at your own risk.**
 
@@ -29,8 +29,8 @@ Do not use this tool on public or untrusted Wi-Fi networks. **Use at your own ri
 
 ## Requirements
 
-  - Python 3.x
-  - The `websockets` and `pynput` Python libraries.
+  * Python 3.x
+  * The `websockets` and `pynput` Python libraries.
 
 ### Installation
 
@@ -61,24 +61,24 @@ python3 keyshare.py
 
 You will be prompted for initial setup information:
 
-  - **Permissions**: The script requires elevated privileges to function correctly.
-      - **Windows**: Run your terminal as an Administrator.
-      - **macOS**: Grant Accessibility permissions in System Settings.
-      - **Linux**: You may need to use `sudo`.
-  - **Consent**: Type `yes` to agree to the security terms.
-  - **Username**: Enter a name to identify yourself to peers.
-  - **(Advanced Mode)** **Port**: If in Advanced Mode, you can set a custom port or press Enter for the default.
-  - **(Advanced Mode)** **Custom Keys**: If in Advanced Mode, you can define a comma-separated list of keys to share.
-  - **Your LAN IP**: The script will auto-detect your IP. Press Enter to confirm it.
-  - **First Person?**:
-      - If you are the **first person** starting the session, type `yes`. You are now the host.
-      - If you are **joining** an existing session, type `no` and enter the IP address of the host when prompted.
+  * **Permissions**: The script requires elevated privileges to function correctly.
+      * **Windows**: Run your terminal as an Administrator.
+      * **macOS**: Grant Accessibility permissions in System Settings.
+      * **Linux**: You may need to use `sudo`.
+  * **Consent**: Type `yes` to agree to the security terms.
+  * **Username**: Enter a name to identify yourself to peers.
+  * **(Advanced Mode)** **Port**: If in Advanced Mode, you can set a custom port or press Enter for the default.
+  * **(Advanced Mode)** **Custom Keys**: If in AdvancedMode, you can define a comma-separated list of keys to share.
+  * **Your LAN IP**: The script will auto-detect your IP. Press Enter to confirm it.
+  * **First Person?**:
+      * If you are the **first person** starting the session, type `yes`. You are now the host.
+      * If you are **joining** an existing session, type `no` and enter the IP address of the host when prompted.
 
 ### 3\. Approve Connections (Host)
 
 As the host, when a new user tries to connect, you will see a clear, multi-line prompt in your terminal:
 `[!] Connection Request (1): Username at 192.168.1.100 would like to join.`
-`     To accept, type 'allow 1'. To reject, type 'deny 1'. `
+`      To accept, type 'allow 1'. To reject, type 'deny 1'. `
 
 ### 4\. Confirm Custom Settings (Client)
 
@@ -90,12 +90,26 @@ If you connect to a host using custom key settings, the script will pause and wa
 
 While the script is running, you can enter commands into the terminal:
 
-  - `pause`: Temporarily stop sending and receiving keystrokes.
-  - `resume`: Resume the session after it has been paused.
-  - `peers`: Show a list of all currently connected peers.
-  - `allow <#>`: Allow a pending connection request with the specified ID number.
-  - `deny <#>`: Deny a pending connection request.
-  - `stop` / `exit` / `quit`: Disconnect all peers and shut down the script.
+  * `pause`: Temporarily stop sending and receiving keystrokes.
+  * `resume`: Resume the session after it has been paused.
+  * `peers`: Show a list of all currently connected peers.
+  * `allow <#>`: Allow a pending connection request with the specified ID number.
+  * `deny <#>`: Deny a pending connection request.
+  * `stop` / `exit` / `quit`: Disconnect all peers and shut down the script.
+
+-----
+
+## To-Do List 📝
+
+  - [ ] **Implement Stream Visualizer Feature**
+      - [ ] Add a dedicated WebSocket server to the Python script to broadcast key events.
+      - [ ] Make the visualizer server start only when **Advanced Mode** is enabled and after the user agrees to a confirmation prompt.
+      - [ ] Ensure the server relays key press/release events for **all** connected players, not just the host, using a clear JSON format (e.g., `{ "user": "Player1", "key": "w", "type": "down" }`).
+      - [ ] Create the frontend visualizer files:
+          - [ ] **index.html**: A file to structure the display of multiple player keypads.
+          - [ ] **style.css**: A stylesheet for the look of the keys, including a "pressed" state.
+          - [ ] **script.js**: The core logic to connect to the WebSocket and update the keypad UI in real-time based on incoming data.
+      - [ ] Update this README with instructions for using the visualizer as a Browser Source in OBS/Streamlabs.
 
 -----
 
