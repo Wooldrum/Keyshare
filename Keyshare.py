@@ -3,9 +3,10 @@ import websockets
 from pynput.keyboard import Listener, Controller, Key
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────
-AdvancedMode    = False        # set True to enable custom port prompt
-DEFAULT_PORT    = 6969         # default port if not in advanced mode
-ALLOWED         = {'w','a','s','d','e','space', *map(str, range(10))}
+AdvancedMode    = False
+DEFAULT_PORT    = 6969
+DEFAULT_ALLOWED = {'w','a','s','d','e','space', *map(str, range(10))}
+ALLOWED         = DEFAULT_ALLOWED.copy()
 INSTANCE_ID     = str(uuid.uuid4())
 ctrl            = Controller()
 # ─────────────────────────────────────────────────────────────────────────────
@@ -87,16 +88,21 @@ def input_peers():
 
 def inject(key_name, typ):
     try:
-        key = Key.space if key_name == "space" else key_name
-        if typ == "down":
-            ctrl.press(key)
+        key_to_press = None
+        if hasattr(Key, key_name):
+            key_to_press = getattr(Key, key_name)
         else:
-            ctrl.release(key)
+            key_to_press = key_name
+        
+        if typ == "down":
+            ctrl.press(key_to_press)
+        else:
+            ctrl.release(key_to_press)
     except Exception as e:
         print(f"{Colors.RED}[!] Injection error: {e}{Colors.RESET}")
 
 async def ws_handler(ws, path):
-    global hs_counter
+    global hs_counter, ALLOWED
     try:
         msg = await ws.recv()
         req = json.loads(msg)
@@ -118,7 +124,8 @@ async def ws_handler(ws, path):
             await ws.close()
             return
 
-        await ws.send(json.dumps({"type": "handshake_response", "allow": True}))
+        response = {"type": "handshake_response", "allow": True, "allowed_keys": list(ALLOWED)}
+        await ws.send(json.dumps(response))
         
         clients.add(ws)
         in_info[ws] = (user, ip)
@@ -140,6 +147,7 @@ async def ws_handler(ws, path):
             clients.discard(ws)
 
 async def connect(peers, local_ip, uname):
+    global ALLOWED
     for addr in peers:
         uri = f"ws://{addr}:{PORT}"
         try:
@@ -149,8 +157,34 @@ async def connect(peers, local_ip, uname):
             res = json.loads(res_raw)
             
             if res.get("type") == "handshake_response" and res.get("allow"):
+                new_allowed = set(res.get('allowed_keys', DEFAULT_ALLOWED))
+                consent_given = True
+
+                if new_allowed != DEFAULT_ALLOWED:
+                    print(f"\n{Colors.YELLOW}WARNING: The host ({addr}) is using custom key settings.{Colors.RESET}")
+                    print(f"{Colors.YELLOW}The following keys will be shared: {', '.join(sorted(list(new_allowed)))}{Colors.RESET}")
+                    
+                    while True:
+                        confirm = input(f"{Colors.GREEN}Proceed with these settings? (yes/no): {Colors.RESET}").strip().lower()
+                        if confirm in ('yes', 'y'):
+                            break
+                        elif confirm in ('no', 'n'):
+                            consent_given = False
+                            break
+                        else:
+                            print(f"{Colors.RED}Invalid input. Please enter 'yes' or 'no'.{Colors.RESET}")
+
+                if not consent_given:
+                    print(f"{Colors.RED}Connection to {addr} cancelled.{Colors.RESET}")
+                    await ws.close()
+                    continue
+
                 outbound.add(ws); out_info[ws] = addr
+                ALLOWED = new_allowed
                 print(f"{Colors.GREEN}[+] out: {addr}{Colors.RESET}")
+                if new_allowed != DEFAULT_ALLOWED:
+                    print(f"{Colors.BLUE}Key settings synced with host.{Colors.RESET}")
+
                 asyncio.create_task(handle_peer(ws))
             else:
                 print(f"{Colors.RED}[-] out denied: {addr}{Colors.RESET}")
@@ -181,13 +215,21 @@ async def broadcast(msg, exclude=None):
         tasks = [w.send(data) for w in targets]
         await asyncio.gather(*tasks, return_exceptions=True)
 
+def get_key_name(key):
+    if isinstance(key, str):
+        return key
+    if isinstance(key, Key):
+        return key.name
+    if hasattr(key, 'char') and key.char:
+        return key.char.lower()
+    return None
+
 def handle_key(k, typ):
     if paused or not loop: return
-    try: ch = k.char.lower()
-    except: ch = "space" if k==Key.space else None
+    key_name = get_key_name(k)
     
-    if ch in ALLOWED:
-        pkt = {"origin":INSTANCE_ID,"key":ch,"type":typ}
+    if key_name in ALLOWED:
+        pkt = {"origin":INSTANCE_ID,"key":key_name,"type":typ}
         asyncio.run_coroutine_threadsafe(broadcast(pkt), loop)
 
 def on_press(k):  handle_key(k, "down")
@@ -218,7 +260,7 @@ def cmd_loop():
             elif cmd == "peers":
                 ins = [f"{in_info[w][0]}[{in_info[w][1]}]" for w in clients]
                 outs = [out_info[w] for w in outbound]
-                print(f"{Colors.BLUE} IN:{Colors.RESET}", ins or "none"); print(f"{Colors.BLUE}OUT:{Colors.RESET}", outs or "none")
+                print(f"{Colors.BLUE}IN:{Colors.RESET} {ins or 'none'}\n{Colors.BLUE}OUT:{Colors.RESET} {outs or 'none'}")
             elif cmd in ("allow","deny") and len(line)==2 and line[1].isdigit():
                 hid = int(line[1])
                 fut = hs_futures.get(hid)
@@ -233,11 +275,70 @@ def cmd_loop():
             if loop: loop.call_soon_threadsafe(loop.stop)
             break
 
-async def main():
-    global loop, PORT
-    loop = asyncio.get_running_loop()
+def konami_listener(activated_event):
+    KONAMI_CODE = [Key.up, Key.up, Key.down, Key.down, Key.left, Key.right, Key.left, Key.right, 'b', 'a']
+    code_keys = [get_key_name(k) for k in KONAMI_CODE]
+    recent_keys = []
 
-    prompt_consent()
+    def on_press(key):
+        nonlocal recent_keys
+        if activated_event.is_set():
+            return False
+
+        key_name = get_key_name(key)
+        if key_name is None: return
+
+        recent_keys.append(key_name)
+        if len(recent_keys) > len(code_keys):
+            recent_keys.pop(0)
+
+        if recent_keys == code_keys:
+            global AdvancedMode
+            AdvancedMode = True
+            print(f"\n{Colors.YELLOW}** ADVANCED MODE ACTIVATED **{Colors.RESET}")
+            activated_event.set()
+            return False
+
+    with Listener(on_press=on_press) as l:
+        l.join()
+
+def input_allowed_keys():
+    print(f"{Colors.BLUE}Current allowed keys: {', '.join(sorted(list(ALLOWED)))}{Colors.RESET}")
+    while True:
+        raw = input(f"{Colors.GREEN}Enter new keys (comma separated), or press ENTER to keep current: {Colors.RESET}").strip()
+        if not raw:
+            return ALLOWED
+        
+        parts = {p.strip().lower() for p in raw.split(",")}
+        if all(parts):
+            print(f"{Colors.BLUE}New allowed keys set.{Colors.RESET}")
+            return parts
+        print(f"{Colors.RED}Invalid input. Please provide a comma-separated list of keys.{Colors.RESET}")
+
+async def main():
+    global loop, PORT, ALLOWED, AdvancedMode
+    
+    konami_activated = threading.Event()
+    konami_thread = threading.Thread(target=konami_listener, args=(konami_activated,), daemon=True)
+    konami_thread.start()
+    
+    def consent_input_wrapper(result_container):
+        prompt_consent()
+        result_container["done"] = True
+    
+    consent_result = {"done": False}
+    consent_thread = threading.Thread(target=consent_input_wrapper, args=(consent_result,), daemon=True)
+    consent_thread.start()
+    
+    while not consent_result["done"] and not konami_activated.is_set():
+        await asyncio.sleep(0.1)
+    
+    if konami_activated.is_set():
+        consent_thread.join(timeout=5)
+    
+    konami_activated.set()
+
+    loop = asyncio.get_running_loop()
     username = input(f"{Colors.GREEN}Username: {Colors.RESET}").strip() or "Anonymous"
 
     if AdvancedMode:
@@ -248,7 +349,8 @@ async def main():
                 if 1024 <= PORT <= 65535: break
             except: pass
             print(f"{Colors.RED}Invalid port. Try again.{Colors.RESET}")
-    
+        ALLOWED = input_allowed_keys()
+
     print(f"{Colors.BLUE}Using port: {PORT}{Colors.RESET}")
     local_ip = input_ip("Your LAN IP (Press ENTER if this is correct)", default=get_local_ip())
     peers = input_peers()
@@ -271,7 +373,7 @@ async def main():
 
 if __name__=="__main__":
     if OS == "Windows":
-        os.system('') 
+        os.system('')
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
