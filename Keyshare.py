@@ -1,28 +1,34 @@
-import asyncio, json, threading, sys, uuid, socket, platform
+import asyncio, json, threading, sys, uuid, socket, platform, os
 import websockets
 from pynput.keyboard import Listener, Controller, Key
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────
 AdvancedMode    = False        # set True to enable custom port prompt
 DEFAULT_PORT    = 6969         # default port if not in advanced mode
-PORT            = DEFAULT_PORT
 ALLOWED         = {'w','a','s','d','e','space', *map(str, range(10))}
 INSTANCE_ID     = str(uuid.uuid4())
 ctrl            = Controller()
 # ─────────────────────────────────────────────────────────────────────────────
 
-OS          = platform.system()
-clients     = set()      # incoming ws
-outbound    = set()      # outgoing ws
-in_info     = {}         # ws -> (user, ip)
-out_info    = {}         # ws -> ip
-paused      = False
-loop        = None       # Global loop object
+class Colors:
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    BLUE = '\033[94m'
+    RESET = '\033[0m'
 
-# handshake queues
+OS          = platform.system()
+clients     = set()
+outbound    = set()
+in_info     = {}
+out_info    = {}
+paused      = False
+loop        = None
+PORT        = DEFAULT_PORT
+
 hs_counter      = 0
-hs_futures      = {}  # id -> Future
-hs_requests     = {}  # id -> (ws, user, ip)
+hs_futures      = {}
+hs_requests     = {}
 
 def validate_ip(addr):
     if addr.lower()=="localhost": return True
@@ -30,19 +36,19 @@ def validate_ip(addr):
     except: return False
 
 def prompt_consent():
-    print("Welcome to Keyshare, developed by Wooldrum.\nDetected OS:", OS)
-    if OS=="Darwin":  print(" macOS: grant Accessibility perms")
-    if OS=="Linux":   print(" Linux: may need sudo or uinput perms")
-    if OS=="Windows": print(" Windows: run as Admin")
+    print(f"{Colors.GREEN}Welcome to Keyshare, developed by Wooldrum.{Colors.RESET}\nDetected OS: {OS}")
+    if OS=="Darwin":  print(f"{Colors.YELLOW}  macOS: You may need to grant Accessibility perms{Colors.RESET}")
+    if OS=="Linux":   print(f"{Colors.YELLOW}  Linux: You may need sudo or uinput perms{Colors.RESET}")
+    if OS=="Windows": print(f"{Colors.YELLOW}  Windows: You may need to run as Admin{Colors.RESET}")
     print(f"""
-WARNING: Keyshare broadcasts your keys to peers (malicious risk)
+{Colors.YELLOW}WARNING: Keyshare broadcasts your keyboard inputs to peers, and has an inherent malicious risk.{Colors.RESET}
 • If streaming/recording, hide this window to avoid exposing your IP.
-• Peers see your IP ⇒ possible DDoS or location leaks.
+• Peers see your IP, which may expose you to possible DDoS or location leaks.
 • P2P-only, no end-to-end encryption—use at your own risk.
 Default port: {DEFAULT_PORT}{' (customizable in advanced mode)' if AdvancedMode else ''}
 """)
-    if input("Do you consent? (yes/no): ").strip().lower() not in ("yes","y"):
-        print("Consent denied. Exiting."); sys.exit(0)
+    if input(f"{Colors.GREEN}Do you consent? (yes/no): {Colors.RESET}").strip().lower() not in ("yes","y"):
+        print(f"{Colors.RED}Consent denied. Exiting.{Colors.RESET}"); sys.exit(0)
 
 def get_local_ip():
     s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
@@ -52,34 +58,32 @@ def get_local_ip():
 
 def input_ip(prompt, default=None):
     while True:
-        val = input(f"{prompt}{' ['+default+']' if default else ''}: ").strip()
+        val = input(f"{Colors.GREEN}{prompt}{' ['+default+']' if default else ''}: {Colors.RESET}").strip()
         if not val and default: return default
         if validate_ip(val): return val
-        print("Invalid IP. Try again.")
+        print(f"{Colors.RED}Invalid IP. Try again.{Colors.RESET}")
 
 def input_peers():
     while True:
-        first_user_response = input("Are you the first person in the group? (yes/no): ").strip().lower()
+        first_user_response = input(f"{Colors.GREEN}Are you the first person in the group? (yes/no): {Colors.RESET}").strip().lower()
         if first_user_response in ("yes", "y"):
-            print("Okay, you are the host. Waiting for others to connect to you...")
+            print(f"{Colors.BLUE}Okay, you are the host. Waiting for others to connect to you...{Colors.RESET}")
             return []
         elif first_user_response in ("no", "n"):
             break
         else:
-            print("Invalid response. Please enter 'yes' or 'no'.")
+            print(f"{Colors.RED}Invalid response. Please enter 'yes' or 'no'.{Colors.RESET}")
 
     while True:
-        raw = input("Enter the IP of at least one other person in the group (comma separated): ").strip()
+        raw = input(f"{Colors.GREEN}Enter the IP of at least one other person in the group (comma separated): {Colors.RESET}").strip()
         if not raw:
-            print("\nTo join, you must enter the IP address of someone already in the session.")
+            print(f"\n{Colors.RED}To join, you must enter the IP address of someone already in the session.{Colors.RESET}")
             continue
         
         parts = [p.strip() for p in raw.split(",")]
         if all(validate_ip(p) for p in parts):
             return parts
-        print("One or more IPs were invalid. Please try again.")
-
-def send_to_stringlab(e): pass  # stub
+        print(f"{Colors.RED}One or more IPs were invalid. Please try again.{Colors.RESET}")
 
 def inject(key_name, typ):
     try:
@@ -89,7 +93,7 @@ def inject(key_name, typ):
         else:
             ctrl.release(key)
     except Exception as e:
-        print(f"[!] Injection error: {e}")
+        print(f"{Colors.RED}[!] Injection error: {e}{Colors.RESET}")
 
 async def ws_handler(ws, path):
     global hs_counter
@@ -105,7 +109,7 @@ async def ws_handler(ws, path):
         fut = loop.create_future()
         hs_futures[hid] = fut
         hs_requests[hid] = (ws, user, ip)
-        print(f"[?] ({hid}) {user}[{ip}] wants to connect. Type 'allow {hid}' or 'deny {hid}'.")
+        print(f"{Colors.YELLOW}[?] ({hid}) {user}[{ip}] wants to connect. Type 'allow {hid}' or 'deny {hid}'.{Colors.RESET}")
 
         allow = await fut
         del hs_futures[hid], hs_requests[hid]
@@ -118,14 +122,13 @@ async def ws_handler(ws, path):
         
         clients.add(ws)
         in_info[ws] = (user, ip)
-        print(f"[+] in: {user}[{ip}]")
+        print(f"{Colors.GREEN}[+] in: {user}[{ip}]{Colors.RESET}")
         
         async for raw in ws:
             d = json.loads(raw)
             if d.get("origin") == INSTANCE_ID: continue
             if not paused:
                 inject(d["key"], d["type"])
-                send_to_stringlab(d)
             await broadcast(d, exclude={ws})
 
     except websockets.ConnectionClosed:
@@ -133,7 +136,7 @@ async def ws_handler(ws, path):
     finally:
         if ws in clients:
             user, ip = in_info.pop(ws, ("?","?"))
-            print(f"[-] disconnected: {user}[{ip}]")
+            print(f"{Colors.BLUE}[-] disconnected: {user}[{ip}]{Colors.RESET}")
             clients.discard(ws)
 
 async def connect(peers, local_ip, uname):
@@ -147,13 +150,13 @@ async def connect(peers, local_ip, uname):
             
             if res.get("type") == "handshake_response" and res.get("allow"):
                 outbound.add(ws); out_info[ws] = addr
-                print(f"[+] out: {addr}")
+                print(f"{Colors.GREEN}[+] out: {addr}{Colors.RESET}")
                 asyncio.create_task(handle_peer(ws))
             else:
-                print(f"[-] out denied: {addr}")
+                print(f"{Colors.RED}[-] out denied: {addr}{Colors.RESET}")
                 await ws.close()
         except Exception as e:
-            print(f"[!] Connection to {addr} failed: {e}")
+            print(f"{Colors.RED}[!] Connection to {addr} failed: {e}{Colors.RESET}")
 
 async def handle_peer(ws):
     try:
@@ -162,14 +165,13 @@ async def handle_peer(ws):
             if d.get("origin") == INSTANCE_ID: continue
             if not paused:
                 inject(d["key"], d["type"])
-                send_to_stringlab(d)
             await broadcast(d, exclude={ws})
     except websockets.ConnectionClosed:
         pass
     finally:
         if ws in outbound:
             addr = out_info.pop(ws, "?")
-            print(f"[-] out disconnected: {addr}")
+            print(f"{Colors.BLUE}[-] out disconnected: {addr}{Colors.RESET}")
             outbound.discard(ws)
 
 async def broadcast(msg, exclude=None):
@@ -180,7 +182,6 @@ async def broadcast(msg, exclude=None):
         await asyncio.gather(*tasks, return_exceptions=True)
 
 def handle_key(k, typ):
-    global loop
     if paused or not loop: return
     try: ch = k.char.lower()
     except: ch = "space" if k==Key.space else None
@@ -188,7 +189,6 @@ def handle_key(k, typ):
     if ch in ALLOWED:
         pkt = {"origin":INSTANCE_ID,"key":ch,"type":typ}
         asyncio.run_coroutine_threadsafe(broadcast(pkt), loop)
-        send_to_stringlab(pkt)
 
 def on_press(k):  handle_key(k, "down")
 def on_release(k): handle_key(k, "up")
@@ -206,58 +206,55 @@ def cmd_loop():
             if not line: continue
             cmd = line[0].lower()
             if cmd == "pause":
-                paused=True; print("== paused ==")
+                print(f"{Colors.YELLOW}== paused =={Colors.RESET}")
+                paused=True
             elif cmd == "resume":
-                paused=False; print("== resumed ==")
+                print(f"{Colors.YELLOW}== resumed =={Colors.RESET}")
+                paused=False
             elif cmd in ("stop","exit","quit"):
-                print("== stopping ==")
-                if loop:
-                    for ws in list(clients | outbound):
-                        loop.create_task(ws.close())
-                    loop.call_soon_threadsafe(loop.stop)
+                print(f"{Colors.RED}== stopping =={Colors.RESET}")
+                if loop: loop.call_soon_threadsafe(loop.stop)
                 break
             elif cmd == "peers":
                 ins = [f"{in_info[w][0]}[{in_info[w][1]}]" for w in clients]
                 outs = [out_info[w] for w in outbound]
-                print(" IN:", ins or "none"); print("OUT:", outs or "none")
+                print(f"{Colors.BLUE} IN:{Colors.RESET}", ins or "none"); print(f"{Colors.BLUE}OUT:{Colors.RESET}", outs or "none")
             elif cmd in ("allow","deny") and len(line)==2 and line[1].isdigit():
                 hid = int(line[1])
                 fut = hs_futures.get(hid)
                 if fut and not fut.done():
                     fut.set_result(cmd=="allow")
-                    print(f"Request #{hid} has been {'allowed' if cmd=='allow' else 'denied'}.")
+                    print(f"{Colors.GREEN if cmd=='allow' else Colors.RED}Request #{hid} has been {'allowed' if cmd=='allow' else 'denied'}.{Colors.RESET}")
                 else:
-                    print(f"No pending request #{hid}")
+                    print(f"{Colors.RED}No pending request #{hid}{Colors.RESET}")
             else:
-                print("cmds:", ", ".join(sorted(cmds)))
+                print(f"{Colors.YELLOW}cmds:{Colors.RESET}", ", ".join(sorted(cmds)))
         except (EOFError, KeyboardInterrupt):
-            if loop:
-                loop.call_soon_threadsafe(loop.stop)
+            if loop: loop.call_soon_threadsafe(loop.stop)
             break
 
 async def main():
-    global loop
+    global loop, PORT
     loop = asyncio.get_running_loop()
 
     prompt_consent()
-    username = input("Username: ").strip() or "Anonymous"
+    username = input(f"{Colors.GREEN}Username: {Colors.RESET}").strip() or "Anonymous"
 
     if AdvancedMode:
         while True:
             try:
-                p = input(f"Set port (1024–65535) [default {DEFAULT_PORT}]: ").strip()
+                p = input(f"{Colors.GREEN}Set port (1024–65535) [default {DEFAULT_PORT}]: {Colors.RESET}").strip()
                 PORT = int(p) if p else DEFAULT_PORT
                 if 1024 <= PORT <= 65535: break
             except: pass
-            print("Invalid port. Try again.")
-    print(f"Using port: {PORT}")
+            print(f"{Colors.RED}Invalid port. Try again.{Colors.RESET}")
     
-    local_ip = input_ip("LAN IP", default=get_local_ip())
+    print(f"{Colors.BLUE}Using port: {PORT}{Colors.RESET}")
+    local_ip = input_ip("Your LAN IP (Press ENTER if this is correct)", default=get_local_ip())
     peers = input_peers()
     
-    # Start the server to listen for incoming connections
     server = await websockets.serve(ws_handler, local_ip, PORT)
-    print(f"✅ Server running on {local_ip}:{PORT}")
+    print(f"{Colors.GREEN}✅ Server running on {local_ip}:{PORT}{Colors.RESET}")
     
     threading.Thread(target=start_hook, daemon=True).start()
     threading.Thread(target=cmd_loop, daemon=True).start()
@@ -265,12 +262,17 @@ async def main():
     if peers:
         asyncio.create_task(connect(peers, local_ip, username))
     
-    print("✅ Ready. Commands: pause | resume | stop | peers | allow <#> | deny <#>")
+    print(f"{Colors.GREEN}✅ Ready. Commands: pause | resume | stop | peers | allow <#> | deny <#>{Colors.RESET}")
     
-    await server.wait_closed()
+    try:
+        await server.wait_closed()
+    finally:
+        server.close()
 
 if __name__=="__main__":
+    if OS == "Windows":
+        os.system('') 
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\nExiting program.")
+        print(f"\n{Colors.RED}Exiting program.{Colors.RESET}")
