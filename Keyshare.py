@@ -39,9 +39,9 @@ def validate_ip(addr):
 
 def prompt_consent():
     print(f"{Colors.GREEN}Welcome to Keyshare, developed by Wooldrum.{Colors.RESET}\nDetected OS: {OS}")
-    if OS=="Darwin":  print(f"{Colors.YELLOW}  macOS: You may need to grant Accessibility perms{Colors.RESET}")
-    if OS=="Linux":   print(f"{Colors.YELLOW}  Linux: You may need sudo or uinput perms{Colors.RESET}")
-    if OS=="Windows": print(f"{Colors.YELLOW}  Windows: You may need to run as Admin{Colors.RESET}")
+    if OS=="Darwin":  print(f"{Colors.YELLOW}  macOS: On Mac, you may need to grant Accessibility permissions.{Colors.RESET}")
+    if OS=="Linux":   print(f"{Colors.YELLOW}  Linux: On Linux, you may need sudo or uinput permissions.{Colors.RESET}")
+    if OS=="Windows": print(f"{Colors.YELLOW}  Windows: On Windows, you may need to run as an administrator.{Colors.RESET}")
     print(f"""
 {Colors.YELLOW}WARNING: Keyshare broadcasts your keyboard inputs to peers, and has an inherent malicious risk.{Colors.RESET}
 • If streaming/recording, hide this window to avoid exposing your IP.
