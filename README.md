@@ -17,7 +17,7 @@ Keyshare is a Python-based utility that broadcasts keyboard inputs to other comp
 
 ## ⚠️ Security Warning
 
-This application is designed for use on **trusted private networks only**.
+This application is designed for use with **trusted private networks only**.
 
   * **No Encryption**: All keystroke data is broadcast without end-to-end encryption.
   * **IP Address Exposure**: Your local IP address is shared with all peers. This can lead to potential security risks like DDoS attacks if used on an untrusted network.
