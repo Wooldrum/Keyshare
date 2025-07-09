@@ -1,0 +1,41 @@
+body { font-family: 'Inter', Arial, sans-serif; }
+
+.player-title {
+  color:#000;
+  -webkit-text-stroke:5px #fff;
+  text-stroke:5px #fff;
+  font-weight:700;
+  margin-bottom:12px;
+  text-align:center;
+  font-size:4rem;
+  text-shadow:0 2px 4px rgba(0,0,0,.35);
+}
+
+.keyboard {
+  background:rgba(0,0,0,.45);
+  padding:12px;
+  border-radius:16px;
+  min-width:500px;
+}
+
+.row { display:flex; justify-content:center; margin-bottom:6px; }
+
+.key {
+  background:rgba(255,255,255,.9);
+  border-radius:8px;
+  margin:3px;
+  padding:16px 0;
+  flex:1;
+  text-align:center;
+  font-size:1.1rem;
+  font-weight:600;
+  user-select:none;
+  transition:transform .06s, background .06s;
+}
+
+.key.pressed { background:#4A5568; color:#fff; transform:scale(.93); }
+
+.wide   { flex:2;   }
+.wider  { flex:2.5; }
+.widest { flex:3.5; }
+.space  { flex:7;   }
