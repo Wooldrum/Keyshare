@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Keyshare BETA v0.1.3</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="KeyshareKey.png?v=0.1.3" type="image/png">
+    <script type="text/javascript" src="/eel.js"></script>
+</head>
+<body>
+    <div class="container">
+        <img src="KeyshareLogo.png" alt="Keyshare Logo" class="logo">
+        
+        <div id="connection-controls" class="card">
+            <h2>Connection</h2>
+            <div class="form-group">
+                <label for="username">Username:</label>
+                <input type="text" id="username" value="Anonymous">
+            </div>
+            <div class="form-group">
+                <label for="peer_ip">Peer IP (for joining):</label>
+                <input type="text" id="peer_ip" placeholder="e.g., 192.168.1.100">
+            </div>
+            <div class="form-group options">
+                 <label>
+                    <input type="checkbox" id="enable-overlay">
+                    Enable Stream Visualizer
+                </label>
+            </div>
+            <div class="button-group">
+                <button id="host-btn">Host New Session</button>
+                <button id="join-btn">Join Session</button>
+            </div>
+        </div>
+
+        <div id="session-controls" class="card" style="display: none;">
+            <h2>Session Control</h2>
+            <div class="button-group">
+                <button id="pause-btn">Pause</button>
+                <button id="edit-keys-btn" style="display: none;">Edit Keys</button>
+                <button id="stop-btn">Stop Session</button>
+            </div>
+        </div>
+
+        <div class="panels">
+            <div class="card panel">
+                <h2>Connected Peers</h2>
+                <ul id="peer-list">
+                    </ul>
+            </div>
+            <div class="card panel">
+                <h2>Log</h2>
+                <div id="log-box">
+                    </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="key-editor-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-button">&times;</span>
+            <h2>Edit Allowed Keys</h2>
+            <div id="key-checkboxes"></div>
+            <button id="save-keys-btn">Save</button>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
