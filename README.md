@@ -1,4 +1,4 @@
-# Keyshare (EXPERIMENTAL)
+# Keyshare (NON-FUNCTIONAL)
 
 Keyshare is a Python-based utility that broadcasts keyboard inputs to other computers on the same network in real-time. It creates a peer-to-peer (P2P) session where keystrokes on one machine are instantly mirrored on all connected peer machines. By default, it shares `W`, `A`, `S`, `D`, `E`, `Space`, and numbers `0-9`, but the session host can define a custom set of keys.
 
