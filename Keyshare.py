@@ -1,13 +1,17 @@
-import asyncio, json, threading, sys, uuid, socket, platform, os
+import asyncio, json, threading, sys, uuid, socket, platform, os, functools, urllib.parse
 import websockets
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pynput.keyboard import Listener, Controller, Key
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────
 AdvancedMode    = False
 DEFAULT_PORT    = 6969
+OVERLAY_WS_PORT = 6970
+OVERLAY_HTTP_PORT = 8000
 DEFAULT_ALLOWED = {'w','a','s','d','e','space', *map(str, range(10))}
 ALLOWED         = DEFAULT_ALLOWED.copy()
 INSTANCE_ID     = str(uuid.uuid4())
+VIS_DIR         = os.path.join(os.path.dirname(__file__), "visualizer")
 ctrl            = Controller()
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -31,6 +35,55 @@ config_version = 1
 hs_counter      = 0
 hs_futures      = {}
 hs_requests     = {}
+
+overlay_on      = False
+overlay_clients = set()
+
+async def overlay_broadcast(pkt):
+    if not overlay_clients:
+        return
+    data = json.dumps(pkt)
+    dead = []
+    for ws in list(overlay_clients):
+        try:
+            await ws.send(data)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        overlay_clients.discard(ws)
+
+async def send_player_list():
+    players = [USERNAME] + [in_info[w][0] for w in clients]
+    await overlay_broadcast({"type": "players", "players": players})
+
+async def overlay_ws(ws):
+    overlay_clients.add(ws)
+    try:
+        await send_player_list()
+        async for _ in ws:
+            pass
+    finally:
+        overlay_clients.discard(ws)
+
+async def overlay_process_request(path, h):
+    hdr = getattr(h, "headers", h)
+    if hdr.get("Upgrade", "").lower() == "websocket":
+        return
+    return 200, [("Content-Type", "text/plain")], b"Keyshare overlay"
+
+def start_static_server():
+    if not os.path.isdir(VIS_DIR):
+        print(f"{Colors.RED}[overlay] visualizer folder not found at {VIS_DIR}{Colors.RESET}")
+        return
+    handler = functools.partial(SimpleHTTPRequestHandler, directory=VIS_DIR)
+    ThreadingHTTPServer(("0.0.0.0", OVERLAY_HTTP_PORT), handler).serve_forever()
+
+async def start_overlay_servers():
+    try:
+        await websockets.serve(overlay_ws, "", OVERLAY_WS_PORT, process_request=overlay_process_request)
+        threading.Thread(target=start_static_server, daemon=True).start()
+    except Exception as e:
+        print(f"{Colors.RED}[overlay] failed: {e}{Colors.RESET}")
 
 def validate_ip(addr):
     if addr.lower()=="localhost": return True
@@ -132,7 +185,9 @@ async def ws_handler(ws, path):
         clients.add(ws)
         in_info[ws] = (user, ip)
         print(f"{Colors.GREEN}[+] in: {user}[{ip}]{Colors.RESET}")
-        
+        if overlay_on:
+            asyncio.create_task(send_player_list())
+
         async for raw in ws:
             d = json.loads(raw)
             if d.get("origin") == INSTANCE_ID: continue
@@ -147,6 +202,8 @@ async def ws_handler(ws, path):
             user, ip = in_info.pop(ws, ("?","?"))
             print(f"{Colors.BLUE}[-] disconnected: {user}[{ip}]{Colors.RESET}")
             clients.discard(ws)
+            if overlay_on:
+                asyncio.create_task(send_player_list())
 
 async def connect(peers, local_ip, uname):
     global ALLOWED, config_version
@@ -189,6 +246,8 @@ async def connect(peers, local_ip, uname):
                     print(f"{Colors.BLUE}Key settings synced with host.{Colors.RESET}")
 
                 asyncio.create_task(handle_peer(ws, addr))
+                if overlay_on:
+                    asyncio.create_task(send_player_list())
             else:
                 print(f"{Colors.RED}[-] out denied: {addr}{Colors.RESET}")
                 await ws.close()
@@ -241,6 +300,8 @@ async def handle_peer(ws, addr):
             addr = out_info.pop(ws, "?")
             print(f"{Colors.BLUE}[-] out disconnected: {addr}{Colors.RESET}")
             outbound.discard(ws)
+            if overlay_on:
+                asyncio.create_task(send_player_list())
 
 async def broadcast(msg, exclude=None):
     targets = (clients | outbound) - (exclude or set())
@@ -248,6 +309,8 @@ async def broadcast(msg, exclude=None):
         data = json.dumps(msg)
         tasks = [w.send(data) for w in targets]
         await asyncio.gather(*tasks, return_exceptions=True)
+    if overlay_on:
+        await overlay_broadcast(msg)
 
 def get_key_name(key):
     if isinstance(key, str): return key
@@ -360,7 +423,7 @@ def input_allowed_keys():
         print(f"{Colors.RED}Invalid input. Please provide a comma-separated list of keys.{Colors.RESET}")
 
 async def main():
-    global loop, PORT, ALLOWED, AdvancedMode
+    global loop, PORT, ALLOWED, AdvancedMode, overlay_on
     
     konami_activated = threading.Event()
     startup_finished = threading.Event()
@@ -397,6 +460,19 @@ async def main():
     print(f"{Colors.BLUE}Using port: {PORT}{Colors.RESET}")
     local_ip = input_ip("Your LAN IP (Press ENTER if this is correct)", default=get_local_ip())
     peers = input_peers()
+
+    overlay_enabled = input(f"{Colors.GREEN}Enable stream visualizer overlay? (yes/no): {Colors.RESET}").lower() in ("yes","y")
+    if overlay_enabled:
+        global overlay_on
+        overlay_on = True
+        layout = "vertical"
+        if AdvancedMode:
+            ans = input(f"{Colors.GREEN}Stack keyboards vertically? (yes = vertical, no = horizontal): {Colors.RESET}").strip().lower()
+            layout = "vertical" if ans in ("", "yes", "y") else "horizontal"
+        asyncio.create_task(start_overlay_servers())
+        query = urllib.parse.urlencode({"ws": f"ws://127.0.0.1:{OVERLAY_WS_PORT}", "layout": layout})
+        url = f"http://127.0.0.1:{OVERLAY_HTTP_PORT}/index.html?{query}"
+        print(f"{Colors.GREEN}Visualizer ready → {url}{Colors.RESET}")
     
     startup_finished.set()
     konami_thread.join(timeout=1)
