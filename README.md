@@ -7,11 +7,11 @@ Keyshare is a Python-based utility that broadcasts keyboard inputs to other comp
 ## Features
 
   * **Real-Time P2P Broadcasting**: Instantly sends keystrokes to all connected peers in a synchronized session.
+  * **Stream Visualizer Overlay**: 👁️ Launches a local web server to display all players' keystrokes in real-time, perfect for streaming overlays in OBS or Streamlabs.
   * **Cross-Platform**: Works on Windows, macOS, and Linux, with specific instructions for each.
   * **Host-Controlled Sessions**: The first person to start a session acts as the host, determining the port and shared keys for everyone.
-  * **Automatic Settings Sync**: Clients who join a session automatically adopt the host's key configuration.
-  * **Security Confirmation**: Joining a session with custom key settings requires explicit consent after showing which keys will be monitored.
-  * **Advanced Mode**: Enter the Konami Code at startup to unlock the ability to set a custom port and define which keys to share.
+  * **Dynamic Re-Consent**: If the host edits keys mid-session, all clients are paused and must explicitly consent to the new key configuration before resuming.
+  * **Advanced Mode**: Enter the Konami Code at startup to unlock the ability to set a custom port, define which keys to share, and configure the visualizer layout.
 
 -----
 
@@ -31,6 +31,7 @@ Do not use this tool on public or untrusted Wi-Fi networks. **Use at your own ri
 
   * Python 3.x
   * The `websockets` and `pynput` Python libraries.
+  * A `visualizer` folder containing `index.html`, `style.css`, and `script.js` in the same directory as the script.
 
 ### Installation
 
@@ -68,7 +69,9 @@ You will be prompted for initial setup information:
   * **Consent**: Type `yes` to agree to the security terms.
   * **Username**: Enter a name to identify yourself to peers.
   * **(Advanced Mode)** **Port**: If in Advanced Mode, you can set a custom port or press Enter for the default.
-  * **(Advanced Mode)** **Custom Keys**: If in AdvancedMode, you can define a comma-separated list of keys to share.
+  * **(Advanced Mode)** **Custom Keys**: If in Advanced Mode, you can define a comma-separated list of keys to share.
+  * **Enable Visualizer**: Type `yes` to start the local server for the stream overlay.
+  * **(Advanced Mode)** **Layout**: If you enabled the visualizer in Advanced Mode, you can choose a `vertical` or `horizontal` layout.
   * **Your LAN IP**: The script will auto-detect your IP. Press Enter to confirm it.
   * **First Person?**:
       * If you are the **first person** starting the session, type `yes`. You are now the host.
@@ -80,9 +83,22 @@ As the host, when a new user tries to connect, you will see a clear, multi-line 
 `[!] Connection Request (1): Username at 192.168.1.100 would like to join.`
 `      To accept, type 'allow 1'. To reject, type 'deny 1'. `
 
-### 4\. Confirm Custom Settings (Client)
+### 4\. Confirm Setting Changes (Client)
 
-If you connect to a host using custom key settings, the script will pause and warn you. It will list all keys the host has configured and you must type `yes` to accept and proceed.
+If you connect to a host using custom keys, or if the host edits them mid-session, the script will pause and warn you. It will list all keys the host has configured and you must type `yes` to accept and proceed.
+
+-----
+
+## Using the Stream Visualizer
+
+If you enabled the visualizer, the script will print a URL in the terminal after setup is complete:
+`Visualizer ready → http://127.0.0.1:8000/index.html?ws=ws://127.0.0.1:6970&layout=vertical`
+
+**To add this to your stream:**
+
+1.  In OBS or Streamlabs, add a new **Browser Source**.
+2.  Copy the URL from your terminal and paste it into the URL field of the Browser Source properties.
+3.  Adjust the width and height as needed. The visualizer will now appear in your scene, updating in real-time.
 
 -----
 
@@ -95,21 +111,8 @@ While the script is running, you can enter commands into the terminal:
   * `peers`: Show a list of all currently connected peers.
   * `allow <#>`: Allow a pending connection request with the specified ID number.
   * `deny <#>`: Deny a pending connection request.
+  * `edit`: (Advanced Mode only) Pause the session and edit the list of shared keys.
   * `stop` / `exit` / `quit`: Disconnect all peers and shut down the script.
-
------
-
-## To-Do List 📝
-
-  - [ ] **Implement Stream Visualizer Feature**
-      - [ ] Add a dedicated WebSocket server to the Python script to broadcast key events.
-      - [ ] Make the visualizer server start only when **Advanced Mode** is enabled and after the user agrees to a confirmation prompt.
-      - [ ] Ensure the server relays key press/release events for **all** connected players, not just the host, using a clear JSON format (e.g., `{ "user": "Player1", "key": "w", "type": "down" }`).
-      - [ ] Create the frontend visualizer files:
-          - [ ] **index.html**: A file to structure the display of multiple player keypads.
-          - [ ] **style.css**: A stylesheet for the look of the keys, including a "pressed" state.
-          - [ ] **script.js**: The core logic to connect to the WebSocket and update the keypad UI in real-time based on incoming data.
-      - [ ] Update this README with instructions for using the visualizer as a Browser Source in OBS/Streamlabs.
 
 -----
 
