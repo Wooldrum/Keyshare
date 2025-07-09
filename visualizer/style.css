@@ -1,0 +1,32 @@
+body {
+  background: rgba(0,0,0,0);
+  color: white;
+  font-family: sans-serif;
+  margin: 0;
+}
+.player {
+  margin: 5px;
+}
+.keys {
+  display: flex;
+  flex-wrap: wrap;
+}
+.key {
+  border: 1px solid #444;
+  margin: 2px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  min-width: 20px;
+  text-align: center;
+  user-select: none;
+}
+.key.pressed {
+  background: #0a0;
+  color: #fff;
+}
+.layout-horizontal {
+  display: flex;
+}
+.layout-horizontal .player {
+  margin-right: 10px;
+}
