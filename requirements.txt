@@ -1,2 +1,5 @@
-pynput
 websockets
+pynput
+keyboard
+mouse
+pyautogui
