@@ -68,8 +68,9 @@ You will be prompted for initial setup information:
   * **Consent**: Type `yes` to agree to the security terms.
   * **Username**: Enter a name to identify yourself to peers.
   * **(Advanced Mode)** **Port**: If in Advanced Mode, you can set a custom port or press Enter for the default.
-  * **(Advanced Mode)** **Custom Keys**: If in AdvancedMode, you can define a comma-separated list of keys to share.
-  * **Your LAN IP**: The script will auto-detect your IP. Press Enter to confirm it.
+  * **(Advanced Mode)** **Custom Keys**: If in Advanced Mode, you can define a comma-separated list of keys to share.
+  * **Advertised IP**: Defaults to your public IP (if reachable) or LAN IP. This is what you give to peers.
+  * **Bind Address**: Defaults to `0.0.0.0` to listen on all interfaces; keep this unless you need to restrict it.
   * **First Person?**:
       * If you are the **first person** starting the session, type `yes`. You are now the host.
       * If you are **joining** an existing session, type `no` and enter the IP address of the host when prompted.
@@ -96,6 +97,18 @@ While the script is running, you can enter commands into the terminal:
   * `allow <#>`: Allow a pending connection request with the specified ID number.
   * `deny <#>`: Deny a pending connection request.
   * `stop` / `exit` / `quit`: Disconnect all peers and shut down the script.
+
+-----
+
+## No Router Access? Use an Overlay
+
+If you cannot port forward (dorm, CGNAT, locked router):
+
+  * Install **Tailscale** (or ZeroTier) on all participants.
+  * Join the same tailnet/network; everyone gets a 100.x (or 10.x) address.
+  * Run Keyshare and share your Tailscale/ZeroTier IP and port. No router changes required.
+
+Tunneling alternatives: `ngrok tcp <port>`, `playit.gg`, or `cloudflared tunnel --url tcp://localhost:<port>` can also expose your session without router access (host runs the tunnel; guests use the provided endpoint).
 
 -----
 

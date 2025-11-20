@@ -1,4 +1,4 @@
-import asyncio, json, threading, sys, uuid, socket, platform, os
+import asyncio, json, threading, sys, uuid, socket, platform, os, ipaddress, urllib.request, subprocess, ctypes
 import websockets
 from pynput.keyboard import Listener, Controller, Key
 
@@ -27,6 +27,8 @@ paused      = False
 loop        = None
 PORT        = DEFAULT_PORT
 config_version = 1
+server_ref  = None
+stop_event  = None
 
 hs_counter      = 0
 hs_futures      = {}
@@ -36,6 +38,47 @@ def validate_ip(addr):
     if addr.lower()=="localhost": return True
     try: socket.inet_aton(addr); return True
     except: return False
+
+def get_public_ip():
+    try:
+        with urllib.request.urlopen("https://api.ipify.org", timeout=5) as resp:
+            return resp.read().decode().strip()
+    except Exception:
+        return None
+
+def is_private_ip(addr):
+    try: return ipaddress.ip_address(addr).is_private
+    except Exception: return False
+
+def is_admin():
+    if OS != "Windows":
+        return False
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+def firewall_rule_exists(port):
+    rule_name = f"Keyshare_{port}"
+    cmd = ["netsh","advfirewall","firewall","show","rule",f"name={rule_name}"]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        return res.returncode == 0 and rule_name.lower() in res.stdout.lower()
+    except Exception:
+        return False
+
+def add_firewall_rule(port):
+    rule_name = f"Keyshare_{port}"
+    cmd = [
+        "netsh","advfirewall","firewall","add","rule",
+        f"name={rule_name}","dir=in","action=allow",
+        "protocol=TCP",f"localport={port}","profile=private"
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        print(f"{Colors.GREEN}Windows Firewall rule added for TCP {port}.{Colors.RESET}")
+    except Exception as e:
+        print(f"{Colors.RED}Failed to add firewall rule automatically: {e}{Colors.RESET}")
 
 def prompt_consent():
     print(f"{Colors.GREEN}Welcome to Keyshare, developed by Wooldrum.{Colors.RESET}\nDetected OS: {OS}")
@@ -119,7 +162,11 @@ async def ws_handler(ws, path):
         print(f"\n{Colors.YELLOW}[!] Connection Request ({hid}): {user} at {ip} would like to join.\n"
               f"    To accept, type 'allow {hid}'. To reject, type 'deny {hid}'.{Colors.RESET}")
 
-        allow = await fut
+        try:
+            allow = await asyncio.wait_for(fut, timeout=30)
+        except asyncio.TimeoutError:
+            print(f"{Colors.RED}Request #{hid} timed out (no host response).{Colors.RESET}")
+            allow = False
         del hs_futures[hid], hs_requests[hid]
         if not allow:
             await ws.send(json.dumps({"type": "handshake_response", "allow": False}))
@@ -249,6 +296,22 @@ async def broadcast(msg, exclude=None):
         tasks = [w.send(data) for w in targets]
         await asyncio.gather(*tasks, return_exceptions=True)
 
+def schedule_shutdown(reason="unknown"):
+    if not loop: return
+    async def _shutdown():
+        global server_ref
+        if stop_event and not stop_event.is_set():
+            stop_event.set()
+        for ws in list(clients):
+            await ws.close()
+        for ws in list(outbound):
+            await ws.close()
+        if server_ref:
+            server_ref.close()
+            await server_ref.wait_closed()
+        print(f"{Colors.BLUE}Event loop stopped ({reason}).{Colors.RESET}")
+    asyncio.create_task(_shutdown())
+
 def get_key_name(key):
     if isinstance(key, str): return key
     if isinstance(key, Key): return key.name
@@ -289,7 +352,8 @@ def cmd_loop():
                 print(f"{Colors.YELLOW}== resumed =={Colors.RESET}"); paused=False
             elif cmd in ("stop","exit","quit"):
                 print(f"{Colors.RED}== stopping =={Colors.RESET}")
-                if loop: loop.call_soon_threadsafe(loop.stop)
+                if loop:
+                    loop.call_soon_threadsafe(schedule_shutdown, "user_requested")
                 break
             elif cmd == "peers":
                 ins = [f"{in_info[w][0]}[{in_info[w][1]}]" for w in clients]
@@ -360,7 +424,7 @@ def input_allowed_keys():
         print(f"{Colors.RED}Invalid input. Please provide a comma-separated list of keys.{Colors.RESET}")
 
 async def main():
-    global loop, PORT, ALLOWED, AdvancedMode
+    global loop, PORT, ALLOWED, AdvancedMode, server_ref
     
     konami_activated = threading.Event()
     startup_finished = threading.Event()
@@ -382,6 +446,8 @@ async def main():
         consent_thread.join(timeout=5)
     
     loop = asyncio.get_running_loop()
+    global stop_event
+    stop_event = asyncio.Event()
     username = input(f"{Colors.GREEN}Username: {Colors.RESET}").strip() or "Anonymous"
 
     if AdvancedMode:
@@ -393,22 +459,45 @@ async def main():
             except: pass
             print(f"{Colors.RED}Invalid port. Try again.{Colors.RESET}")
         ALLOWED = input_allowed_keys()
-
+    
     print(f"{Colors.BLUE}Using port: {PORT}{Colors.RESET}")
-    local_ip = input_ip("Your LAN IP (Press ENTER if this is correct)", default=get_local_ip())
+    lan_ip = get_local_ip()
+    pub_ip = get_public_ip()
+    if pub_ip:
+        print(f"{Colors.BLUE}Detected public IP: {pub_ip}{Colors.RESET}")
+    else:
+        print(f"{Colors.YELLOW}Could not auto-detect public IP (likely blocked).{Colors.RESET}")
+
+    advertise_default = pub_ip or lan_ip
+    advertised_ip = input_ip("IP to share with peers (LAN or public)", default=advertise_default)
+    bind_host = input_ip("Local address to bind (0.0.0.0 for all interfaces)", default="0.0.0.0")
     peers = input_peers()
     
     startup_finished.set()
     konami_thread.join(timeout=1)
 
-    server = await websockets.serve(ws_handler, local_ip, PORT)
-    print(f"{Colors.GREEN}✅ Server running on {local_ip}:{PORT}{Colors.RESET}")
+    if OS == "Windows" and is_admin():
+        if not firewall_rule_exists(PORT):
+            print(f"{Colors.BLUE}Adding Windows Firewall rule for TCP {PORT}...{Colors.RESET}")
+            add_firewall_rule(PORT)
+        else:
+            print(f"{Colors.BLUE}Windows Firewall rule for TCP {PORT} already present.{Colors.RESET}")
+    elif OS == "Windows":
+        print(f"{Colors.YELLOW}Run as Administrator to auto-add Windows Firewall rule for TCP {PORT}.{Colors.RESET}")
+
+    server = await websockets.serve(ws_handler, bind_host, PORT)
+    server_ref = server
+    print(f"{Colors.GREEN}✅ Server running on {bind_host}:{PORT} (advertised as {advertised_ip}){Colors.RESET}")
+    if not is_private_ip(advertised_ip):
+        print(f"{Colors.YELLOW}For internet peers: forward TCP {PORT} on your router to {lan_ip} and allow it through your firewall.{Colors.RESET}")
+    elif advertised_ip.startswith('127.'):
+        print(f"{Colors.RED}127.0.0.1 is not reachable by others. Use your LAN or public IP instead.{Colors.RESET}")
     
     threading.Thread(target=start_hook, daemon=True).start()
     threading.Thread(target=cmd_loop, daemon=True).start()
     
     if peers:
-        asyncio.create_task(connect(peers, local_ip, username))
+        asyncio.create_task(connect(peers, advertised_ip, username))
     
     ready_cmds = ["pause","resume","stop","peers","allow","deny"]
     if AdvancedMode:
